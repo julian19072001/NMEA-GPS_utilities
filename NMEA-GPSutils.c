@@ -13,7 +13,9 @@
 #include "NMEA-GPSutils.h"
 
 
-/* ----- BEGIN OF GPS UTILS ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- */
+/* ----- BEGIN OF RMC UTILS ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- */
+#define LINE_LEN 1024
+#define RMCARRAY_GROWRATE 100
 
 /*! \brief Check if the checksum at the end of the NMEA line is correct
  *  
@@ -220,6 +222,64 @@ bool parseRmcLine(char *line, RMC_t *out){
 }/*parseRmcLine*/
 
 
+/*! \brief parse file with RMC data to create array with waypoints (waypoint path)
+ *  
+ *  \param fileName filename of file containing multiple RMC lines
+ * 
+ *  \param numRead Location where to save how many RMC lines are withing the file
+ * 
+ *  \returns array of RMC data points
+ */
+RMC_t *parseRmcFile(const char *fileName, int *numRead) {
+	RMC_t *res = NULL, curRMC;
+	int resCapacity = 0, lineNo = 0,validRMC;
+	FILE *inFile = NULL;
+	char buf[LINE_LEN];
+
+	*numRead = 0;
+
+    // Check if filename exists
+	inFile = fopen(fileName, "r");
+	if(inFile == NULL) {
+		fprintf(stderr, "*** Opening RMC map path file");
+		return NULL;
+	}
+    
+    // Read all lines from file.
+	while(fgets(buf, LINE_LEN, inFile) != NULL) {
+		lineNo++;
+        // Check if line is a valid RMC line
+		validRMC = parseRmcLine(buf, &curRMC);
+
+		if(validRMC) {
+            // If the array is too small allocated more room
+			if(resCapacity <= *numRead) {
+				resCapacity += RMCARRAY_GROWRATE;
+				res = (RMC_t *) realloc(res, resCapacity * sizeof(RMC_t));
+				assert(res != NULL);
+			}
+			res[*numRead] = curRMC;
+			(*numRead)++;			
+		}
+	}
+	
+	fprintf(stderr, "=== %d RMC waypoints read in %d lines\n", *numRead, lineNo);
+	fclose(inFile);
+  
+	if(res == NULL) {
+		fprintf(stderr, "Cant open file\n");
+		exit(2);
+	}
+  
+	if(*numRead < 2) {
+		fprintf(stderr, "*** At least 2 valid RMC waypoints required (got %ls)\n", numRead);
+		exit(3);
+	}
+  
+	return res;
+}/*parseRmcFile*/
+
+
 /*! \brief Print data from RMC struct
  *  
  *  \param printLocation File where the data needs to printed
@@ -241,7 +301,7 @@ void printRmcData(FILE* printLocation, RMC_t gpsData){
     else
         fprintf(printLocation, "Course: (empty)\n");
     fprintf(printLocation, "Date: %04d-%02d-%02d\n", gpsData.year, gpsData.month, gpsData.day);
-    if (gpsData.hasMagvar) fprintf(printLocation, "Magvar: %.2f %c\n", gpsData.magvar, gpsData.magvarEW);
+    if (gpsData.hasMagvar) fprintf(printLocation, "Magvar: %.2f\n", gpsData.magvar);
     else fprintf(printLocation, "Magvar: (null)\n");
     if (gpsData.mode) fprintf(printLocation, "Mode: %c\n", gpsData.mode);
     if (gpsData.navStatus) fprintf(printLocation, "Nav status: %c\n", gpsData.navStatus);

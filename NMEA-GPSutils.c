@@ -13,7 +13,7 @@
 #include "NMEA-GPSutils.h"
 #include "../RPI-serial/RPIserial.h"
 
-device gpsModule;
+device_t gpsModule;
 
 
 /* ----- BEGIN OF RMC UTILS ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- */
@@ -169,7 +169,7 @@ bool parseRmcLine(char *line, RMC_t *out){
     }
 
     // Check if checksum is correct
-    if (!validate_nmea_checksum(line)) return false;
+    if (!validateNmeaChecksum(line)) return false;
 
     // Remove checksum before splitting the line into fields
     char *star = strchr(line, '*');
@@ -177,7 +177,7 @@ bool parseRmcLine(char *line, RMC_t *out){
 
     // Split all fields into a seprate variable
     char *fields[MAX_FIELDS];
-    int nfields = split_nmea_fields(line, fields);
+    int nfields = splitFields(line, fields);
     // Clear fields if number of received fields is not correct
     const char *time_s = (nfields > 1) ? fields[1] : "";
     const char *status = (nfields > 2) ? fields[2] : "";
@@ -197,11 +197,11 @@ bool parseRmcLine(char *line, RMC_t *out){
     out->valid = (status && status[0] == 'A');
 
     // Parse time
-    if (time_s) parse_time(time_s, &out->hour, &out->minute, &out->second, &out->msec);
+    if (time_s) parseTime(time_s, &out->hour, &out->minute, &out->second, &out->msec);
 
     // Convert gps location into decimal notation
-    out->latDeg = convert_nmea_to_deg(lat_s, (latNS && latNS[0]) ? latNS[0] : '\0');
-    out->lonDeg = convert_nmea_to_deg(lon_s, (lonEW && lonEW[0]) ? lonEW[0] : '\0');
+    out->latDeg = convertNmeaToDeg(lat_s, (latNS && latNS[0]) ? latNS[0] : '\0');
+    out->lonDeg = convertNmeaToDeg(lon_s, (lonEW && lonEW[0]) ? lonEW[0] : '\0');
 
     // speed and course
     double speed_knots = (speed_s && speed_s[0]) ? atof(speed_s) : 0.0;
@@ -209,7 +209,7 @@ bool parseRmcLine(char *line, RMC_t *out){
     out->courseDeg = (course_s && course_s[0]) ? atof(course_s) : NAN;
 
     // Parse date
-    parse_date(date_s, &out->day, &out->month, &out->year);
+    parseDate(date_s, &out->day, &out->month, &out->year);
 
     // magvar (can be empty)
     out->hasMagvar = (magvar_s && magvar_s[0]);
@@ -293,36 +293,35 @@ RMC_t getNewRmcLine(void){
     char buf[LINE_LEN];
     int idx = 0;
     RMC_t rmcRes;
+    RMC_t empty = {0};
 
     while(1){    
         if (canReadByte(&gpsModule)) {
             uint8_t byte;
-            int res = readByte(&gpsModule, &t);
+            int res = readByte(&gpsModule, &byte);
             if (res == 1) {
-                char character = (char)t;
+                char character = (char)byte;
                 if (character == '\n') {
-                    
-                    buf[idx] = '\0';
-                    
-                    // strip trailing \r if present
-                    if (idx > 0 && buf[idx-1] == '\r') buf[idx-1] = '\0';
-                    
-                    if(parseRmcLine(&buf, &rmcRes)) return rmcRes;
-                    
-                    idx = 0;
-                } 
+                buf[idx] = '\0';
+                // strip trailing \r if present
+                if (idx > 0 && buf[idx-1] == '\r') buf[idx-1] = '\0';
                 
-                // Check for buffer overflow - reset and skip
-                if (idx < LINE_LEN - 1) buf[idx++] = character;
-                else idx = 0;
-            } 
-        } else if (res < 0) {
-            fprintf(stderr, "Error reading byte from serial\n");
-            usleep(10000);
-        } else return NULL;
+                if (parseRmcLine(buf, &rmcRes)) return rmcRes;
+                
+                idx = 0;
+                } else {
+                    // accumulate character
+                    if (idx < LINE_LEN - 1) buf[idx++] = character;
+                    else idx = 0; // buffer overflow
+                }
+            } else if (res < 0) {
+                fprintf(stderr, "Error reading byte from serial\n");
+                usleep(10000);
+            } else return empty;
+        }
     }
 
-    return NULL;
+    return empty;
 }/*getNewRmcLine*/
 
 
@@ -392,10 +391,10 @@ double getDistance(const RMC_t *orig, const RMC_t *dest){
  * 
  *  \param currentWaypoint number of the waypoint to closest location
  */
-double DistanceToEnd(RMC_t *path, int numberOfWaypoints, int currentWaypoint){
+double getDistanceToEnd(RMC_t *path, int numberOfWaypoints, int currentWaypoint){
   double distanceLeft = 0;
   for(int i = numberOfWaypoints - 1; currentWaypoint < i; i--){
-        distanceLeft += Distance(path + i - 1, path + i);
+        distanceLeft += getDistance(path + i - 1, path + i);
   }
   return distanceLeft;
 }/*getDistanceToEnd*/
@@ -429,7 +428,7 @@ double getBearing(const RMC_t *orig, const RMC_t *dest){
  * 
  *  \param mid mid point between the waypoints
  */
-void MidWaypoint(const RMC_t *orig, const RMC_t *dest, RMC_t *mid){
+void getMidWaypoint(const RMC_t *orig, const RMC_t *dest, RMC_t *mid){
     double phi1 = DEG2RAD(orig->latDeg);
 	double phi2 = DEG2RAD(dest->latDeg);
 	double deltalambda = DEG2RAD(dest->lonDeg - orig->lonDeg);
@@ -447,7 +446,7 @@ void MidWaypoint(const RMC_t *orig, const RMC_t *dest, RMC_t *mid){
 
     mid->latDeg = RAD2DEG(phi3);
     mid->lonDeg = RAD2DEG(lambda3);
-} /* MidWayPoint */
+}/*getMidWayPoint*/
 
 
 /*! \brief Create new waypoint relative to origin in the direction of bearing with the distance in meters form the origin
@@ -490,9 +489,10 @@ void ExtendPath(const RMC_t *orig, double bearing, double dist, RMC_t *dest){
  *  \param baudrate select baudrate that the gps module is expecting
  */
 void setupGpsDevice(const char* port, int baudrate){
-    gpsModule.deviceport = port;
+    gpsModule.devicePort = port;
     gpsModule.baudrate= baudrate;
-    setupDevice(&gpsModule)
+    setupDevice(&gpsModule);
+    flushBuffer(&gpsModule);
 }/*setupGpsDevice*/
 
 /*! \brief Close serial connection with lidar

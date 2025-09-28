@@ -5,6 +5,7 @@
   #include <stdbool.h>
   #include <string.h>
   #include <stdlib.h>
+  #include <assert.h>
   #include <math.h>
 
     #define ACCEPT_NO_CHECKSUM true     // Set if a line is valid or invalid when no checksum is received 
@@ -31,9 +32,9 @@
     void printRmcData(FILE* printLocation, RMC_t gpsData);
 
     double getDistance(const RMC_t *orig, const RMC_t *dest);
-    double DistanceToEnd(RMC_t *path, int numberOfWaypoints, int currentWaypoint);
+    double getDistanceToEnd(RMC_t *path, int numberOfWaypoints, int currentWaypoint);
     double getBearing(const RMC_t *orig, const RMC_t *dest);
-    void MidWaypoint(const RMC_t *orig, const RMC_t *dest, RMC_t *mid);
+    void getMidWaypoint(const RMC_t *orig, const RMC_t *dest, RMC_t *mid);
     void ExtendPath(const RMC_t *orig, double bearing, double dist, RMC_t *dest);
 
     void setupGpsDevice(const char* port, int baudrate);

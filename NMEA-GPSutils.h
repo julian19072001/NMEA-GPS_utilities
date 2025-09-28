@@ -26,6 +26,8 @@
     } RMC_t;
 
     bool parseRmcLine(char *line, RMC_t *out);
+    RMC_t *parseRmcFile(const char *fileName, int *numRead);
+    RMC_t getNewRmcLine(void);
     void printRmcData(FILE* printLocation, RMC_t gpsData);
 
     double getDistance(const RMC_t *orig, const RMC_t *dest);
@@ -33,4 +35,7 @@
     double getBearing(const RMC_t *orig, const RMC_t *dest);
     void MidWaypoint(const RMC_t *orig, const RMC_t *dest, RMC_t *mid);
     void ExtendPath(const RMC_t *orig, double bearing, double dist, RMC_t *dest);
+
+    void setupGpsDevice(const char* port, int baudrate);
+    void closeGpsDevice(void);
 #endif

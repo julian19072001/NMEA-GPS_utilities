@@ -11,6 +11,9 @@
  */
 
 #include "NMEA-GPSutils.h"
+#include "../RPI-serial/RPIserial.h"
+
+device gpsModule;
 
 
 /* ----- BEGIN OF RMC UTILS ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- */
@@ -230,7 +233,7 @@ bool parseRmcLine(char *line, RMC_t *out){
  * 
  *  \returns array of RMC data points
  */
-RMC_t *parseRmcFile(const char *fileName, int *numRead) {
+RMC_t *parseRmcFile(const char *fileName, int *numRead){
 	RMC_t *res = NULL, curRMC;
 	int resCapacity = 0, lineNo = 0,validRMC;
 	FILE *inFile = NULL;
@@ -278,6 +281,49 @@ RMC_t *parseRmcFile(const char *fileName, int *numRead) {
   
 	return res;
 }/*parseRmcFile*/
+
+/*! \brief Get a new RMC line
+ *  
+ *  \returns stuct with new RMC data
+ * 
+ *  \details Waits until a new RMC data line is received so make sure 
+ *           that data is being send or program will get stuck
+ */
+RMC_t getNewRmcLine(void){
+    char buf[LINE_LEN];
+    int idx = 0;
+    RMC_t rmcRes;
+
+    while(1){    
+        if (canReadByte(&gpsModule)) {
+            uint8_t byte;
+            int res = readByte(&gpsModule, &t);
+            if (res == 1) {
+                char character = (char)t;
+                if (character == '\n') {
+                    
+                    buf[idx] = '\0';
+                    
+                    // strip trailing \r if present
+                    if (idx > 0 && buf[idx-1] == '\r') buf[idx-1] = '\0';
+                    
+                    if(parseRmcLine(&buf, &rmcRes)) return rmcRes;
+                    
+                    idx = 0;
+                } 
+                
+                // Check for buffer overflow - reset and skip
+                if (idx < LINE_LEN - 1) buf[idx++] = character;
+                else idx = 0;
+            } 
+        } else if (res < 0) {
+            fprintf(stderr, "Error reading byte from serial\n");
+            usleep(10000);
+        } else return NULL;
+    }
+
+    return NULL;
+}/*getNewRmcLine*/
 
 
 /*! \brief Print data from RMC struct
@@ -436,3 +482,21 @@ void ExtendPath(const RMC_t *orig, double bearing, double dist, RMC_t *dest){
 }/*ExtendPath*/
 
 /* ----- END OF GPS UTILS ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ */
+
+/*! \brief Establish serial connection with gps module
+ * 
+ *  \param port tty portname where the gps module is connected to
+ * 
+ *  \param baudrate select baudrate that the gps module is expecting
+ */
+void setupGpsDevice(const char* port, int baudrate){
+    gpsModule.deviceport = port;
+    gpsModule.baudrate= baudrate;
+    setupDevice(&gpsModule)
+}/*setupGpsDevice*/
+
+/*! \brief Close serial connection with lidar
+ */
+void closeGpsDevice(void){
+	closeDevice(&gpsModule, true);
+}/*closeGpsDevice*/

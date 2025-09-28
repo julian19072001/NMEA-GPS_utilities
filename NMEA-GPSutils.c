@@ -13,6 +13,8 @@
 #include "NMEA-GPSutils.h"
 
 
+/* ----- BEGIN OF GPS UTILS ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- */
+
 /*! \brief Check if the checksum at the end of the NMEA line is correct
  *  
  *  \param string location of NMEA string
@@ -139,6 +141,15 @@ void parseDate(const char *time, int *day, int *month, int *year){
 }/*parseDate*/
 
 
+/*! \brief parse RMC data from sting into a struct
+ *  
+ *  \param line RMC data line
+ * 
+ *  \param day Struct where the RMC dat needs to written to
+ * 
+ *  \retval false if parsing was not succesfull
+ *  \retval true if parsing was succesfull
+ */
 bool parseRmcLine(char *line, RMC_t *out){
     char utc[32];
 
@@ -195,14 +206,12 @@ bool parseRmcLine(char *line, RMC_t *out){
     // Parse date
     parse_date(date_s, &out->day, &out->month, &out->year);
 
-    // magvar (kan leeg zijn)
+    // magvar (can be empty)
     out->hasMagvar = (magvar_s && magvar_s[0]);
     if (out->hasMagvar) {
         out->magvar = atof(magvar_s);
-        out->magvarEW = (magvarEW_s && magvarEW_s[0]) ? magvarEW_s[0] : '\0';
-        if (out->magvarEW == 'W') out->magvar = -out->magvar;
+        if ((magvarEW_s && magvarEW_s[0]) ? magvarEW_s[0] : '\0' == 'W') out->magvar = -out->magvar;
     }
-
     
     out->mode = (mode_s && mode_s[0]) ? mode_s[0] : '\0';
     out->navStatus = (navStatus_s && navStatus_s[0]) ? navStatus_s[0] : '\0';
@@ -211,6 +220,12 @@ bool parseRmcLine(char *line, RMC_t *out){
 }/*parseRmcLine*/
 
 
+/*! \brief Print data from RMC struct
+ *  
+ *  \param printLocation File where the data needs to printed
+ * 
+ *  \param gpsData RMC struct from which the data needs to be printed
+ */
 void printRmcData(FILE* printLocation, RMC_t gpsData){
     if(!printLocation) return;
     fprintf(printLocation, "--- GNRMC ---\n");
@@ -232,3 +247,132 @@ void printRmcData(FILE* printLocation, RMC_t gpsData){
     if (gpsData.navStatus) fprintf(printLocation, "Nav status: %c\n", gpsData.navStatus);
     fprintf(printLocation, "---------------\n");
 }
+
+/* ----- END OF RMC UTILS ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ */
+/* ----- BEGIN OF GPS UTILS ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- */
+// For explanation for all the calculation look at: https://www.movable-type.co.uk/scripts/latlong.html
+// Functions written by JDB in "autorouter.c"
+
+#define EARTH_RADIUS 6371e3
+#define DEG2RAD(x) ((x) * M_PI / 180.0)
+#define RAD2DEG(x) ((x) * 180.0 / M_PI)
+
+/*! \brief Get the distance in meters between two waypoints
+ *  
+ *  \param orig First waypoint
+ * 
+ *  \param dest Second waypoint
+ */
+double getDistance(const RMC_t *orig, const RMC_t *dest){
+	double phi1 = DEG2RAD(orig->latDeg);
+	double phi2 = DEG2RAD(dest->latDeg);
+	double deltaphi = DEG2RAD(dest->latDeg - orig->latDeg);
+	double deltalambda = DEG2RAD(dest->lonDeg - orig->lonDeg);
+
+	double a = sin(deltaphi / 2.0) * sin(deltaphi / 2.0)
+				+ cos(phi1) * cos(phi2)
+				* sin(deltalambda / 2) * sin(deltalambda / 2);
+	double c = 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
+
+	return EARTH_RADIUS * c;
+}/*getDistance*/
+
+
+/*! \brief Get the distance until the end of the waypoint path in meters through following the path
+ *  
+ *  \param path Array with waypoints 
+ * 
+ *  \param numberOfWaypoints numberOfWaypoints in path
+ * 
+ *  \param currentWaypoint number of the waypoint to closest location
+ */
+double DistanceToEnd(RMC_t *path, int numberOfWaypoints, int currentWaypoint){
+  double distanceLeft = 0;
+  for(int i = numberOfWaypoints - 1; currentWaypoint < i; i--){
+        distanceLeft += Distance(path + i - 1, path + i);
+  }
+  return distanceLeft;
+}/*getDistanceToEnd*/
+
+
+/*! \brief Get the direction in degrees the destination is relative to the origin
+ *  
+ *  \param orig First waypoint
+ * 
+ *  \param dest Second waypoint
+ */
+double getBearing(const RMC_t *orig, const RMC_t *dest){
+	double phi1 = DEG2RAD(orig->latDeg);
+	double phi2 = DEG2RAD(dest->latDeg);
+	double deltalambda = DEG2RAD(dest->lonDeg - orig->lonDeg);
+
+	double y = sin(deltalambda) * cos(phi2);
+	double x = cos(phi1) * sin(phi2) - sin(phi1) * cos(phi2) * cos(deltalambda);
+
+	double bearing = RAD2DEG(atan2(y, x));
+
+	return (bearing >= 0.0) ? bearing : bearing + 360.0; 
+} /*getBearing*/
+
+
+/*! \brief Get the waypoint in the middle of two different waypoints
+ *  
+ *  \param orig First waypoint
+ * 
+ *  \param dest Second waypoint
+ * 
+ *  \param mid mid point between the waypoints
+ */
+void MidWaypoint(const RMC_t *orig, const RMC_t *dest, RMC_t *mid){
+    double phi1 = DEG2RAD(orig->latDeg);
+	double phi2 = DEG2RAD(dest->latDeg);
+	double deltalambda = DEG2RAD(dest->lonDeg - orig->lonDeg);
+
+    double x = cos(phi2) * cos(deltalambda);
+    double y = cos(phi2) * sin(deltalambda);
+    double phi3 = atan2(sin(phi1) + sin(phi2), sqrt((cos(phi1) + x) * (cos(phi1) + x) + y * y));
+    double lambda3 =  orig->lonDeg + atan2(y, cos(phi1) + x);
+
+    /* Normalize the longitude */
+    lambda3 += 3.0 * M_PI;
+    while(lambda3 > 2.0 * M_PI)
+        lambda3 -= 2.0 * M_PI;
+    lambda3 -= M_PI;
+
+    mid->latDeg = RAD2DEG(phi3);
+    mid->lonDeg = RAD2DEG(lambda3);
+} /* MidWayPoint */
+
+
+/*! \brief Create new waypoint relative to origin in the direction of bearing with the distance in meters form the origin
+ *  
+ *  \param orig First waypoint
+ * 
+ *  \param bearing direction relative to the origin waypoint in which the new waypoint should be created
+ * 
+ *  \param dist distance in meters from the origin waypoint that the new waypoint should be created at
+ * 
+ *  \param dest location where the new waypoint should be saved
+ */
+void ExtendPath(const RMC_t *orig, double bearing, double dist, RMC_t *dest){
+	double phi1 = DEG2RAD(orig->latDeg);
+	double lambda1 = DEG2RAD(orig->lonDeg);
+
+	double phi2 = asin(sin(phi1) * cos(dist / EARTH_RADIUS)
+					+ cos(phi1) * sin(dist / EARTH_RADIUS) * cos(DEG2RAD(bearing)));
+	double lambda2 = lambda1 + atan2(sin(DEG2RAD(bearing)) * sin(dist / EARTH_RADIUS) * cos(phi1),
+									cos(dist / EARTH_RADIUS) - sin(phi1) * sin(phi2));
+
+	/* Normalize the longitude */
+	lambda2 += 3.0 * M_PI;
+	while(lambda2 > 2.0 * M_PI)
+		lambda2 -= 2.0 * M_PI;
+	lambda2 -= M_PI;
+
+	assert(dest != NULL);
+
+	dest->latDeg = RAD2DEG(phi2);
+	dest->lonDeg = RAD2DEG(lambda2);
+}/*ExtendPath*/
+
+/* ----- END OF GPS UTILS ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ */

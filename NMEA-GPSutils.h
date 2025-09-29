@@ -36,6 +36,7 @@
     double getBearing(const RMC_t *orig, const RMC_t *dest);
     void getMidWaypoint(const RMC_t *orig, const RMC_t *dest, RMC_t *mid);
     void ExtendPath(const RMC_t *orig, double bearing, double dist, RMC_t *dest);
+    int getClosestWaypointIdx(const RMC_t *curPosRMC, const RMC_t *path, int numWaypoints);
 
     void setupGpsDevice(const char* port, int baudrate);
     void closeGpsDevice(void);

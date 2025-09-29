@@ -178,7 +178,8 @@ bool parseRmcLine(char *line, RMC_t *out){
     // Split all fields into a seprate variable
     char *fields[MAX_FIELDS];
     int nfields = splitFields(line, fields);
-    // Clear fields if number of received fields is not correct
+    
+    // RMC data split into sperarte variables
     const char *time_s = (nfields > 1) ? fields[1] : "";
     const char *status = (nfields > 2) ? fields[2] : "";
     const char *lat_s = (nfields > 3) ? fields[3] : "";
@@ -315,7 +316,6 @@ RMC_t getNewRmcLine(void){
                     else idx = 0; // buffer overflow
                 }
             } else if (res < 0) {
-                fprintf(stderr, "Error reading byte from serial\n");
                 usleep(10000);
             } else return empty;
         }
@@ -479,6 +479,32 @@ void ExtendPath(const RMC_t *orig, double bearing, double dist, RMC_t *dest){
 	dest->latDeg = RAD2DEG(phi2);
 	dest->lonDeg = RAD2DEG(lambda2);
 }/*ExtendPath*/
+
+
+/*! \brief Check what waypoint is closest to the current location and return the number of the closest waypoint
+ * 
+ *  \param curPosRMC current GPS position
+ * 
+ *  \param path pointer to start of path
+ * 
+ *  \param numWaypoints numver of waypoints in path
+ * 
+ *  \return waypoint closest to current location
+ */
+int getClosestWaypointIdx(const RMC_t *curPosRMC, const RMC_t *path, int numWaypoints){
+	int res = 0, i;
+	double curDistance, bestDistance = getDistance(curPosRMC, path);
+
+	for(i = 1; i < numWaypoints; i++) {
+		curDistance = getDistance(curPosRMC, path + i);
+		if(curDistance < bestDistance) {
+			bestDistance = curDistance;
+			res = i;
+		}
+	}
+
+	return res;
+}/*getClosestWaypointIdx*/
 
 /* ----- END OF GPS UTILS ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ */
 
